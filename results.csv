@@ -1,0 +1,11 @@
+test,program,threads,len,time_s
+in_small.txt,./shsup_seq,0,16,5.1358e-05
+in_small.txt,./shsup_seq_v2,0,16,4.8904e-05
+in_small.txt,./shsup_omp,1,16,0.00710292
+in_small.txt,./shsup_omp,2,16,0.00678981
+in_small.txt,./shsup_omp,4,16,0.00219945
+in_small.txt,./shsup_omp,8,16,0.00523716
+in_small.txt,./shsup_omp_v2,1,16,0.00426088
+in_small.txt,./shsup_omp_v2,2,16,0.00510731
+in_small.txt,./shsup_omp_v2,4,16,0.00542418
+in_small.txt,./shsup_omp_v2,8,16,0.00437145
