@@ -3,12 +3,13 @@
 #include <set>
 #include <string>
 #include <utility>
+#include <chrono>
 
 #define standard_input  std::cin
 #define standard_output std::cout
 
 using Boolean = bool ;
-using Size    = std::size_t ;
+using Size    = std::size_t ; 
 using String  = std::string ;
 
 using InStream  = std::istream ;
@@ -230,8 +231,13 @@ write_string_to_standard_ouput (const String& s) -> void
 auto
 main (int argc, char const* argv[]) -> int
 {
-    Set <String> ss = read_strings_from_standard_input () ;
-    write_string_to_standard_ouput (shortest_superstring (ss)) ;
-    return 0 ;
-}
+    Set<String> ss = read_strings_from_standard_input();
+    auto start = std::chrono::high_resolution_clock::now();
+    write_string_to_standard_ouput(shortest_superstring(ss));
+    auto end = std::chrono::high_resolution_clock::now();
 
+    std::chrono::duration<double> elapsed = end - start;
+    standard_output << elapsed.count() << std::endl;
+
+    return 0;
+}

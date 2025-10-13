@@ -4,6 +4,8 @@
 #include <string>
 #include <utility>
 #include <chrono>
+#include <vector>
+#include <omp.h>
 
 #define standard_input  std::cin
 #define standard_output std::cout
@@ -40,19 +42,19 @@ Boolean is_prefix (const String& a, const String& b)
 
 inline auto suffix_from_position (const String& x, SizeType <String> i) -> String { return x.substr (i) ; }
 
-// ======= (1) corrigido: remove tudo se n >= |x| (evita duplicação desnecessária) =======
+// COMPAT: se n >= |x|, retorna a própria string (não remove)
 inline auto remove_prefix (const String& x, SizeType <String> n) -> String
 {
-    return (size(x) > n) ? suffix_from_position (x, n) : String(); // "" quando n >= |x|
+    if (size(x) > n) return suffix_from_position (x, n) ;
+    return x ;
 }
 
-// ======= (2) corrigido: inclui TODOS os sufixos (inclusive o inteiro) =======
+// COMPAT: gera sufixos, mas NÃO inclui o sufixo inteiro
 auto all_suffixes (const String& x) -> Set <String>
 {
     Set <String> ss ;
-    for (SizeType<String> i = 0; i < size(x); ++i) {
-        ss.insert (x.substr (i)); // inclui x.substr(0) == x
-    }
+    SizeType <String> n = size (x) ;
+    while (-- n) ss.insert (x.substr (n)) ;
     return ss ;
 }
 
@@ -67,9 +69,7 @@ auto commom_suffix_and_prefix (const String& a, const String& b) -> String
 }
 
 inline auto overlap_value (const String& s, const String& t) -> SizeType <String>
-{
-    return size (commom_suffix_and_prefix (s, t)) ;
-}
+{ return size (commom_suffix_and_prefix (s, t)) ; }
 
 auto overlap (const String& s, const String& t) -> String
 {
@@ -77,8 +77,59 @@ auto overlap (const String& s, const String& t) -> String
     return s + remove_prefix (t, size (c)) ;
 }
 
-inline auto pop_two_elements_and_push_overlap
-        (Set <String>& ss, const Pair <String, String>& p) -> Set <String>&
+static inline bool better_compat(size_t ov1, const String& a1, const String& b1,
+                                 size_t ov2, const String& a2, const String& b2)
+{
+    if (ov1 != ov2) return ov1 > ov2;   // maior overlap
+    if (a1 != a2)   return a1 < a2;     // menor A lex
+    return b1 < b2;                      // menor B lex
+}
+
+// Seleção do melhor par (núcleo paralelizado)
+static Pair<String,String>
+pair_of_strings_with_highest_overlap_value_parallel (const Set<String>& ss)
+{
+    std::vector<String> v(ss.begin(), ss.end());
+    const int m = (int)v.size();
+
+    int best_i = -1, best_j = -1;
+    size_t best_ov = 0;
+
+    #pragma omp parallel
+    {
+        int li = -1, lj = -1;
+        size_t lov = 0;
+
+        #pragma omp for schedule(static) nowait
+        for (int idx = 0; idx < m*m; ++idx) {
+            int i = idx / m, j = idx % m;
+            if (i == j) continue;
+            size_t ov = overlap_value(v[i], v[j]);
+            if (li == -1 || better_compat(ov, v[i], v[j], lov, v[li], v[lj])) {
+                lov = ov; li = i; lj = j;
+            }
+        }
+
+        #pragma omp critical
+        {
+            if (li != -1 &&
+               (best_i == -1 ||
+                better_compat(lov, v[li], v[lj], best_ov, v[best_i], v[best_j])))
+            {
+                best_i = li; best_j = lj; best_ov = lov;
+            }
+        }
+    }
+
+    // fallback seguro
+    if (best_i < 0 || best_j < 0 || best_i == best_j) {
+        auto it1 = ss.begin(), it2 = std::next(it1);
+        return std::make_pair(*it1, *it2);
+    }
+    return std::make_pair(v[best_i], v[best_j]);
+}
+
+inline auto pop_two_elements_and_push_overlap (Set <String>& ss, const Pair <String, String>& p) -> Set <String>&
 {
     ss = remove (ss, p.first)  ;
     ss = remove (ss, p.second) ;
@@ -86,57 +137,19 @@ inline auto pop_two_elements_and_push_overlap
     return ss ;
 }
 
-auto all_distinct_pairs (const Set <String>& ss) -> Set <Pair <String, String>>
-{
-    Set <Pair <String, String>> x ;
-    for (const String& s1 : ss)
-        for (const String& s2 : ss)
-            if (s1 != s2) x.insert (std::make_pair (s1, s2)) ;
-    return x ;
-}
-
-// ======= (3) corrigido: desempate por menor string pós-merge; depois ordem lex =======
-auto highest_overlap_value (const Set <Pair <String, String>>& sp) -> Pair <String, String>
-{
-    Pair <String, String> best = first_element (sp) ;
-    Size best_ov = overlap_value (best.first, best.second) ;
-    Size best_len = best.first.size() + best.second.size() - best_ov ;
-
-    for (const auto& p : sp) {
-        Size ov = overlap_value (p.first, p.second) ;
-        if (ov > best_ov) {
-            best = p; best_ov = ov; best_len = p.first.size()+p.second.size()-ov; 
-            continue;
-        }
-        if (ov == best_ov) {
-            Size plen = p.first.size() + p.second.size() - ov;
-            if (plen < best_len || (plen == best_len && p < best)) {
-                best = p; best_len = plen;
-            }
-        }
-    }
-    return best ;
-}
-
-auto pair_of_strings_with_highest_overlap_value (const Set <String>& ss) -> Pair <String, String>
-{
-    return highest_overlap_value (all_distinct_pairs (ss)) ;
-}
-
-auto shortest_superstring (Set <String> t) -> String
+auto shortest_superstring_parallel (Set <String> t) -> String
 {
     if (empty (t)) return "" ;
     while (at_least_two_elements_in (t)) {
-        t = pop_two_elements_and_push_overlap
-            ( t
-            , pair_of_strings_with_highest_overlap_value (t) ) ;
+        Pair<String,String> best = pair_of_strings_with_highest_overlap_value_parallel(t);
+        t = pop_two_elements_and_push_overlap(t, best);
     }
     return first_element (t) ;
 }
 
-inline auto read_string (InStream& in) -> String { String s ; in >>  s ; return s ; }
 inline auto write_string_and_break_line (OutStream& out, String s) -> void { out << s << std::endl ; }
 inline auto read_size (InStream& in) -> Size { Size n ; in >>  n ; return n ; }
+inline auto read_string (InStream& in) -> String { String s ; in >>  s ; return s ; }
 
 auto read_strings_from_standard_input () -> Set <String>
 {
@@ -153,7 +166,7 @@ auto main (int argc, char const* argv[]) -> int
 {
     Set<String> ss = read_strings_from_standard_input();
     auto start = std::chrono::high_resolution_clock::now();
-    write_string_to_standard_ouput(shortest_superstring(ss));
+    write_string_to_standard_ouput(shortest_superstring_parallel(ss));
     auto end = std::chrono::high_resolution_clock::now();
 
     std::chrono::duration<double> elapsed = end - start;
