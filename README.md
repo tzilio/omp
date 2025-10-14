@@ -1,3 +1,0 @@
-# omp
-# omp
-# omp

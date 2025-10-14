@@ -14,25 +14,17 @@ OMPFLAGS = -fopenmp
 # -----------------------------
 # Alvos principais
 # -----------------------------
-all: shsup_seq shsup_omp shsup_seq_v2 shsup_omp_v2 input_gen
+all: shsup_omp input_gen
 
-# Versão sequencial (original / compat)
+# Versão "sequencial" sem o fopenmp
 shsup_seq: shortest_superstring.cc
 	$(CXX) $(CXXFLAGS) $< -o $@
 
-# Versão paralela OpenMP (compat)
+# Versão paralela OpenMP com o fopenmp
 shsup_omp: shortest_superstring_omp.cc
 	$(CXX) $(CXXFLAGS) $(OMPFLAGS) $< -o $@
 
-# Versão sequencial corrigida (v2)
-shsup_seq_v2: shortest_superstring_v2.cc
-	$(CXX) $(CXXFLAGS) $< -o $@
-
-# Versão paralela corrigida (v2)
-shsup_omp_v2: shortest_superstring_omp_v2.cc
-	$(CXX) $(CXXFLAGS) $(OMPFLAGS) $< -o $@
-
-# Gerador de entradas (se você tiver esse arquivo)
+# Gerador de entradas
 input_gen: input-generator.cc
 	$(CXX) $(CXXFLAGS) $< -o $@
 
@@ -40,4 +32,4 @@ input_gen: input-generator.cc
 # Limpeza
 # -----------------------------
 clean:
-	rm -f shsup_seq shsup_omp shsup_seq_v2 shsup_omp_v2 input_gen
+	rm -f shsup_seq shsup_omp input_gen

@@ -1,0 +1,3 @@
+threads,N,mean_seq_total,sd_seq_total,mean_omp_total,sd_omp_total,speedup,efficiency,mean_omp_gen,mean_omp_scan
+1,60,0.328763,0.00385126,0.325273,0.00369464,1.01073,1.01073,0.0119747,0.300754
+2,60,0.328763,0.00385126,0.242658,0.00303286,1.35484,0.67742,0.00726876,0.223555
