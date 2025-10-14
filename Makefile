@@ -14,10 +14,10 @@ OMPFLAGS = -fopenmp
 # -----------------------------
 # Alvos principais
 # -----------------------------
-all: shsup_omp input_gen
+all: shsup_seq shsup_omp
 
 # Versão "sequencial" sem o fopenmp
-shsup_seq: shortest_superstring.cc
+shsup_seq: shortest_superstring_omp.cc
 	$(CXX) $(CXXFLAGS) $< -o $@
 
 # Versão paralela OpenMP com o fopenmp
