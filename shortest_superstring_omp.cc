@@ -4,7 +4,7 @@
 #include <string>
 #include <utility>
 #include <chrono>
-#include <vector>   // necessário
+#include <vector>
 
 #ifdef _OPENMP
   #include <omp.h>
@@ -44,7 +44,7 @@ static inline double walltime() {
 #endif
 }
 
-// ---------- utilitários originais ----------
+// ---------- utilitários ----------
 template <typename C> inline auto size (const C& x) -> SizeType <C> { return x.size (); }
 template <typename C> inline auto at_least_two_elements_in (const C& c) -> Boolean { return size (c) > SizeType <C> (1) ; }
 template <typename T> inline auto first_element (const Set <T>& x) -> T { return *(x.begin ()) ; }
@@ -79,8 +79,7 @@ auto all_suffixes (const String& x) -> Set <String>
 
 auto commom_suffix_and_prefix (const String& a, const String& b) -> String
 {
-    if (empty (a)) return "" ;
-    if (empty (b)) return "" ;
+    if (empty (a) || empty (b)) return "" ;
     String x = "" ;
     for (const String& s : all_suffixes (a)) {
         if (is_prefix (s, b) && size (s) > size (x)) x = s ;
@@ -107,9 +106,8 @@ inline auto pop_two_elements_and_push_overlap (Set <String>& ss, const Pair <Str
     return ss ;
 }
 
-// ===================== geração paralela de pares =====================
-// Gera todos os pares ORDENADOS (i!=j) em paralelo, sem locks.
-// Mapeamento determinístico: idx(i,j) = i*(n-1) + (j - (j>i ? 1:0))
+// ===================== geração paralela de pares (sem collapse) =====================
+// idx determinístico (sem diagonal): idx = i*(n-1) + (j < i ? j : j-1)
 auto all_distinct_pairs_parallel (const Set <String>& ss) -> std::vector<Pair<String,String>>
 {
     const double t0 = walltime();
@@ -118,18 +116,23 @@ auto all_distinct_pairs_parallel (const Set <String>& ss) -> std::vector<Pair<St
     for (const auto& s : ss) v.push_back(s);
     const Size n = v.size();
 
-    std::vector<Pair<String,String>> pairs;
-    pairs.resize(n * (n - 1)); // pares ordenados, sem diagonal
-    
-    #ifdef _OPENMP
-        #pragma omp parallel for collapse(2) schedule(static)
-    #endif
+    if (n < 2) {
+        g_time_pairs_gen += (walltime() - t0);
+        return {};
+    }
 
+    std::vector<Pair<String,String>> pairs;
+    pairs.resize(n * (n - 1));
+
+#ifdef _OPENMP
+    #pragma omp parallel for schedule(static)
+#endif
     for (Size i = 0; i < n; ++i) {
         for (Size j = 0; j < n; ++j) {
             if (i == j) continue;
-            const Size idx = i*(n-1) + (j - (j>i ? 1:0));
-            pairs[idx] = std::make_pair(v[i], v[j]);
+            const Size col = (j < i ? j : j - 1); // 0..(n-2)
+            const Size idx = i*(n - 1) + col;     // 0..n*(n-1)-1
+            pairs[idx] = Pair<String,String>{ v[i], v[j] };
         }
     }
 
@@ -146,19 +149,19 @@ auto best_pair_from_pairs_parallel (const std::vector<Pair<String,String>>& pair
     SizeType<String>    global_best = 0;
     bool                global_has  = false;
 
-    #ifdef _OPENMP
-        #pragma omp parallel
-    #endif
+#ifdef _OPENMP
+    #pragma omp parallel
+#endif
     {
         Pair<String,String> local_pair;
         SizeType<String>    local_best = 0;
         bool                local_has  = false;
 
-        #ifdef _OPENMP
-            #pragma omp for schedule(static)
-        #endif
+#ifdef _OPENMP
+        #pragma omp for schedule(dynamic)
+#endif
         for (Size k = 0; k < pairs.size(); ++k) {
-            const auto& p = pairs[k];
+            const auto& p  = pairs[k];
             const auto ov = overlap_value(p.first, p.second);
             if (!local_has ||
                 ov > local_best ||
@@ -170,9 +173,9 @@ auto best_pair_from_pairs_parallel (const std::vector<Pair<String,String>>& pair
             }
         }
 
-        #ifdef _OPENMP
-            #pragma omp critical
-        #endif
+#ifdef _OPENMP
+        #pragma omp critical
+#endif
         {
             if (local_has) {
                 if (!global_has ||
@@ -191,15 +194,14 @@ auto best_pair_from_pairs_parallel (const std::vector<Pair<String,String>>& pair
     return global_pair;
 }
 
-// Pipeline em duas fases:
-// 1) gera pares em paralelo; 2) escolhe melhor par em paralelo
+// 1) gera pares; 2) escolhe melhor
 auto pair_of_strings_with_highest_overlap_value_parallel_v2 (const Set <String>& ss) -> Pair <String, String>
 {
     auto pairs = all_distinct_pairs_parallel(ss);
     return best_pair_from_pairs_parallel(pairs);
 }
-// ===================== FIM NOVO BLOCO =====================
 
+// ===================== algoritmo principal =====================
 auto shortest_superstring (Set <String> t) -> String
 {
     if (empty (t)) return "" ;
@@ -233,20 +235,17 @@ auto main (int /*argc*/, char const* /*argv*/[]) -> int
 
     Set<String> ss = read_strings_from_standard_input();
 
-    auto start = std::chrono::high_resolution_clock::now();
+    const auto start = std::chrono::high_resolution_clock::now();
     write_string_to_standard_ouput(shortest_superstring(ss));
-    auto end = std::chrono::high_resolution_clock::now();
+    const auto end   = std::chrono::high_resolution_clock::now();
 
-    std::chrono::duration<double> elapsed = end - start;
-    double total = elapsed.count();
-    double par   = g_time_pairs_gen + g_time_best_scan;
-    double seq   = std::max(0.0, total - par);
-    double seq_frac = (total > 0.0 ? seq/total : 0.0);
+    const double total = std::chrono::duration<double>(end - start).count();
+    const double par   = g_time_pairs_gen + g_time_best_scan;
+    const double seq   = std::max(0.0, total - par);
+    const double seq_frac = (total > 0.0 ? seq/total : 0.0);
 
-    // mantém sua saída original (superstring + tempo total em stdout)
     standard_output << total << std::endl;
 
-    // métricas extras em stderr: total gen scan seq seq_frac
     std::cerr << total << " " << g_time_pairs_gen << " " << g_time_best_scan
               << " " << seq << " " << seq_frac << "\n";
     return 0;
