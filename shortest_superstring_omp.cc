@@ -106,7 +106,7 @@ inline auto pop_two_elements_and_push_overlap (Set <String>& ss, const Pair <Str
     return ss ;
 }
 
-// ===================== geração paralela de pares (sem collapse) =====================
+// ===================== geração paralela de pares =====================
 // idx determinístico (sem diagonal): idx = i*(n-1) + (j < i ? j : j-1)
 auto all_distinct_pairs_parallel (const Set <String>& ss) -> std::vector<Pair<String,String>>
 {
@@ -246,7 +246,6 @@ auto main (int /*argc*/, char const* /*argv*/[]) -> int
 
     standard_output << total << std::endl;
 
-    std::cerr << total << " " << g_time_pairs_gen << " " << g_time_best_scan
-              << " " << seq << " " << seq_frac << "\n";
+    std::cerr << total << " " << par << " " << seq << " " << seq_frac << "\n";
     return 0;
 }
