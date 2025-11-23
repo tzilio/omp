@@ -1,28 +1,28 @@
 # -----------------------------
 # Compiladores
 # -----------------------------
-CC   = gcc
-CXX  = g++
+CC      = gcc
+CXX     = g++
+MPICXX  = mpic++
 
 # -----------------------------
 # Flags de compilação
 # -----------------------------
-CFLAGS   = -O3 -march=native -Wall -Wextra
-CXXFLAGS = -O3 -std=c++11 -Wall -Wextra
-OMPFLAGS = -fopenmp
+CFLAGS    = -O3 -march=native -Wall -Wextra
+CXXFLAGS  = -O3 -std=c++11 -Wall -Wextra
 
 # -----------------------------
 # Alvos principais
 # -----------------------------
-all: shsup_seq shsup_omp
+all: shsup_seq shsup_mpi
 
-# Versão "sequencial" sem o fopenmp
-shsup_seq: shortest_superstring_omp.cc
+# Versão sequencial
+shsup_seq: shortest_superstring_mpi.cc
 	$(CXX) $(CXXFLAGS) $< -o $@
 
-# Versão paralela OpenMP com o fopenmp
-shsup_omp: shortest_superstring_omp.cc
-	$(CXX) $(CXXFLAGS) $(OMPFLAGS) $< -o $@
+# Versão paralela MPI
+shsup_mpi: shortest_superstring_mpi.cc
+	$(MPICXX) $(CXXFLAGS) $< -o $@
 
 # Gerador de entradas
 input_gen: input-generator.cc
@@ -32,4 +32,4 @@ input_gen: input-generator.cc
 # Limpeza
 # -----------------------------
 clean:
-	rm -f shsup_seq shsup_omp input_gen
+	rm -f shsup_seq shsup_mpi input_gen
