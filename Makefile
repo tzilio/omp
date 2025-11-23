@@ -16,13 +16,13 @@ CXXFLAGS  = -O3 -std=c++11 -Wall -Wextra
 # -----------------------------
 all: shsup_seq shsup_mpi
 
-# Versão sequencial (compilada com mpic++)
+# Versão sequencial (usa g++)
 shsup_seq: shortest_superstring_mpi.cc
-	$(MPICXX) $(CXXFLAGS) $< -o $@
+	$(CXX) $(CXXFLAGS) $< -o $@
 
 # Versão paralela MPI
 shsup_mpi: shortest_superstring_mpi.cc
-	$(MPICXX) $(CXXFLAGS) $< -o $@
+	$(MPICXX) $(CXXFLAGS) -D_MPI $< -o $@
 
 # Gerador de entradas
 input_gen: input-generator.cc
