@@ -16,9 +16,9 @@ CXXFLAGS  = -O3 -std=c++11 -Wall -Wextra
 # -----------------------------
 all: shsup_seq shsup_mpi
 
-# Versão sequencial
+# Versão sequencial (compilada com mpic++)
 shsup_seq: shortest_superstring_mpi.cc
-	$(CXX) $(CXXFLAGS) $< -o $@
+	$(MPICXX) $(CXXFLAGS) $< -o $@
 
 # Versão paralela MPI
 shsup_mpi: shortest_superstring_mpi.cc

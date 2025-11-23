@@ -6,10 +6,9 @@
 #include <chrono>
 #include <vector>
 #include <cstring>
+#include <cstdio>   // snprintf
 
-#ifdef _MPI
-  #include <mpi.h>
-#endif
+#include <mpi.h>
 
 #define standard_input  std::cin
 #define standard_output std::cout
@@ -47,16 +46,20 @@ inline auto remove_prefix(const String& x, SizeType<String> n) -> String {
 
 auto all_suffixes(const String& x) -> Set<String> {
     Set<String> ss;
-    for (Size i = size(x)-1; i > 0; --i) ss.insert(x.substr(i));
+    if (x.empty()) return ss;
+    for (Size i = size(x) - 1; i > 0; --i) {
+        ss.insert(x.substr(i));
+    }
     return ss;
 }
 
 auto commom_suffix_and_prefix(const String& a, const String& b) -> String {
     if (empty(a) || empty(b)) return "";
     String x = "";
-    for (const String& s : all_suffixes(a))
+    for (const String& s : all_suffixes(a)) {
         if (is_prefix(s, b) && size(s) > size(x))
             x = s;
+    }
     return x;
 }
 
@@ -75,7 +78,8 @@ auto overlap(const String& s, const String& t) -> String {
 auto all_distinct_pairs_mpi(const Set<String>& ss, int rank, int nprocs)
     -> std::vector<Pair<String,String>>
 {
-    std::vector<String> v; v.reserve(ss.size());
+    std::vector<String> v; 
+    v.reserve(ss.size());
     for (const auto& s : ss) v.push_back(s);
 
     Size n = v.size();
@@ -91,9 +95,9 @@ auto all_distinct_pairs_mpi(const Set<String>& ss, int rank, int nprocs)
     local_pairs.reserve(end - start);
 
     for (Size idx = start; idx < end; ++idx) {
-        Size i = idx / (n - 1);
+        Size i   = idx / (n - 1);
         Size col = idx % (n - 1);
-        Size j = (col < i ? col : col + 1);
+        Size j   = (col < i ? col : col + 1);
         local_pairs.emplace_back(v[i], v[j]);
     }
 
@@ -110,57 +114,94 @@ auto local_best_pair_mpi(const std::vector<Pair<String,String>>& pairs)
     Size best_value = 0;
     bool has = false;
 
-    for (auto& p : pairs) {
+    for (const auto& p : pairs) {
         Size ov = overlap_value(p.first, p.second);
-        if (!has || ov > best_value ||
-           (ov == best_value && p < best_pair)) {
-            best_pair = p;
+        if (!has ||
+            ov > best_value ||
+            (ov == best_value && p < best_pair))
+        {
+            best_pair  = p;
             best_value = ov;
-            has = true;
+            has        = true;
         }
+    }
+
+    if (!has) {
+        return Pair<String,String>{String(), String()};
     }
 
     return best_pair;
 }
 
 // ------------------------------------------------------------
-// Estrutura auxiliar para MPI_Allreduce
+// Estrutura auxiliar para MPI_Gather / MPI_Bcast
 // ------------------------------------------------------------
 struct BestInfo {
-    Size value;
+    int  value;     // -1 = sem candidato, >=0 = overlap
     char a[256];
     char b[256];
 };
 
 // ------------------------------------------------------------
 // MPI: redução global para encontrar o melhor par
+//   (usa Gather para o rank 0 e depois Broadcast)
 // ------------------------------------------------------------
-auto reduce_best_pair_mpi(const Pair<String,String>& local)
+auto reduce_best_pair_mpi(const Pair<String,String>& local,
+                          int rank, int nprocs)
     -> Pair<String,String>
 {
-    BestInfo in{}, out{};
+    BestInfo send{};
+    // se local.first/local.second vazios, marcamos como "sem candidato"
+    if (local.first.empty() && local.second.empty()) {
+        send.value = -1;
+        send.a[0]  = '\0';
+        send.b[0]  = '\0';
+    } else {
+        send.value = static_cast<int>(overlap_value(local.first, local.second));
+        std::snprintf(send.a, 256, "%s", local.first.c_str());
+        std::snprintf(send.b, 256, "%s", local.second.c_str());
+    }
 
-    in.value = overlap_value(local.first, local.second);
-    std::snprintf(in.a, 256, "%s", local.first.c_str());
-    std::snprintf(in.b, 256, "%s", local.second.c_str());
+    std::vector<BestInfo> all;
+    if (rank == 0) {
+        all.resize(static_cast<std::size_t>(nprocs));
+    }
 
-    auto cmp = [](const BestInfo& x, const BestInfo& y) {
-        if (x.value != y.value) return x.value > y.value;
-        String xa(x.a), xb(x.b);
-        String ya(y.a), yb(y.b);
-        return Pair<String,String>{xa,xb} < Pair<String,String>{ya,yb};
-    };
+    const int bytes = static_cast<int>(sizeof(BestInfo));
 
-    MPI_Allreduce(&in, &out, sizeof(BestInfo), MPI_BYTE,
-        [](void* invec, void* inoutvec, int* len, MPI_Datatype*) {
-            BestInfo* IN  = (BestInfo*)invec;
-            BestInfo* OUT = (BestInfo*)inoutvec;
-            for (int i = 0; i < *len; ++i)
-                if (IN[i].value > OUT[i].value) OUT[i] = IN[i];
-        },
-        MPI_COMM_WORLD);
+    MPI_Gather(&send,  bytes, MPI_BYTE,
+               rank == 0 ? all.data() : nullptr, bytes, MPI_BYTE,
+               0, MPI_COMM_WORLD);
 
-    return { String(out.a), String(out.b) };
+    BestInfo best{};
+    bool found = false;
+
+    if (rank == 0) {
+        for (int p = 0; p < nprocs; ++p) {
+            const BestInfo& cand = all[static_cast<std::size_t>(p)];
+            if (cand.value < 0) continue; // sem candidato nesse processo
+
+            if (!found) {
+                best  = cand;
+                found = true;
+            } else {
+                if (cand.value > best.value) {
+                    best = cand;
+                } else if (cand.value == best.value) {
+                    Pair<String,String> pb(String(best.a), String(best.b));
+                    Pair<String,String> pc(String(cand.a), String(cand.b));
+                    if (pc < pb) best = cand;
+                }
+            }
+        }
+    }
+
+    MPI_Bcast(&best, bytes, MPI_BYTE, 0, MPI_COMM_WORLD);
+
+    if (!found) {
+        return Pair<String,String>{String(), String()};
+    }
+    return Pair<String,String>{ String(best.a), String(best.b) };
 }
 
 // ------------------------------------------------------------
@@ -172,7 +213,7 @@ auto pair_of_strings_with_highest_overlap_value_mpi(const Set<String>& ss,
 {
     auto local_pairs = all_distinct_pairs_mpi(ss, rank, nprocs);
     auto local_best  = local_best_pair_mpi(local_pairs);
-    return reduce_best_pair_mpi(local_best);
+    return reduce_best_pair_mpi(local_best, rank, nprocs);
 }
 
 // ------------------------------------------------------------
@@ -206,13 +247,14 @@ auto two_opt(const std::vector<String>& base)
             for (Size j = i + 1; j < best.size(); ++j) {
 
                 std::vector<String> cand = best;
-                std::reverse(cand.begin() + i, cand.begin() + j + 1);
+                std::reverse(cand.begin() + static_cast<std::ptrdiff_t>(i),
+                             cand.begin() + static_cast<std::ptrdiff_t>(j) + 1);
 
                 String cstr = build_superstring_from_order(cand);
                 Size clen = cstr.size();
 
                 if (clen < best_len) {
-                    best = std::move(cand);
+                    best     = std::move(cand);
                     best_len = clen;
                     improved = true;
                     goto again;
@@ -232,6 +274,7 @@ auto shortest_superstring_with_order(Set<String> t, int rank, int nprocs)
     -> std::vector<String>
 {
     std::vector<String> order;
+    order.reserve(t.size());
     for (const auto& s : t) order.push_back(s);
 
     while (order.size() > 1) {
@@ -279,7 +322,7 @@ int main(int argc, char** argv)
 {
     MPI_Init(&argc, &argv);
 
-    int rank, nprocs;
+    int rank = 0, nprocs = 1;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &nprocs);
 
@@ -290,23 +333,27 @@ int main(int argc, char** argv)
 
     // broadcast das strings
     {
-        // serializa
         std::vector<String> all;
-        if (rank == 0) for (auto& s : ss) all.push_back(s);
+        if (rank == 0) {
+            all.reserve(ss.size());
+            for (auto& s : ss) all.push_back(s);
+        }
 
-        int count = all.size();
+        int count = (rank == 0 ? static_cast<int>(all.size()) : 0);
         MPI_Bcast(&count, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
-        if (rank != 0) all.resize(count);
+        if (rank != 0) all.resize(static_cast<std::size_t>(count));
 
         for (int i = 0; i < count; ++i) {
-            int len = (rank == 0 ? all[i].size() : 0);
+            int len = (rank == 0 ? static_cast<int>(all[i].size()) : 0);
             MPI_Bcast(&len, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
-            std::string tmp(len, ' ');
+            std::string tmp(static_cast<std::size_t>(len), ' ');
             if (rank == 0) tmp = all[i];
 
-            MPI_Bcast(tmp.data(), len, MPI_CHAR, 0, MPI_COMM_WORLD);
+            if (len > 0) {
+                MPI_Bcast(&tmp[0], len, MPI_CHAR, 0, MPI_COMM_WORLD);
+            }
 
             if (rank != 0) all[i] = tmp;
         }
@@ -330,7 +377,7 @@ int main(int argc, char** argv)
     auto end = std::chrono::high_resolution_clock::now();
 
     if (rank == 0) {
-        double t = std::chrono::duration<double>(end-start).count();
+        double t = std::chrono::duration<double>(end - start).count();
         standard_output << t << "\n";
     }
 
