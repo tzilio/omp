@@ -228,32 +228,28 @@ static BestPair mpi_find_best_pair(const std::vector<String>& v, MPI_Comm comm)
     int n = (int)v.size();
     long long total = 1LL * n * (n - 1);
 
-    const long long STRIDE = 256;
-
     BestPair local{-1, 0, 1};
 
-    // Cada processo trabalha nos blocos:
-    // [rank*STRIDE + k*np*STRIDE, rank*STRIDE + k*np*STRIDE + STRIDE)
-    for (long long base = rank * STRIDE;
-         base < total;
-         base += (long long)np * STRIDE)
+    // STRIDED VERDADEIRO:
+    // cada processo avalia k = rank, rank+np, rank+2*np, ...
+    for (long long k = rank; k < total; k += np)
     {
-        long long end = std::min(base + STRIDE, total);
+        int i, j;
+        linear_to_pair(k, n, i, j);
 
-        for (long long k = base; k < end; ++k) {
-            int i, j;
-            linear_to_pair(k, n, i, j);
+        int ov = (int)overlap_value(v[i], v[j]);
 
-            int ov = (int)overlap_value(v[i], v[j]);
+        bool take =
+            (ov > local.ov) ||
+            (ov == local.ov && (
+                i < local.i ||
+                (i == local.i && j < local.j)
+            ));
 
-            if (ov > local.ov ||
-                (ov == local.ov && (i < local.i ||
-                (i == local.i && j < local.j))))
-            {
-                local.ov = ov;
-                local.i  = i;
-                local.j  = j;
-            }
+        if (take) {
+            local.ov = ov;
+            local.i  = i;
+            local.j  = j;
         }
     }
 
