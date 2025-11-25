@@ -228,34 +228,42 @@ static BestPair mpi_find_best_pair(const std::vector<String>& v, MPI_Comm comm)
     int n = (int)v.size();
     long long total = 1LL * n * (n - 1);
 
-    long long chunk = total / np;
-    long long start = rank * chunk;
-    long long end   = (rank == np - 1 ? total : start + chunk);
+    const long long STRIDE = 256;
 
     BestPair local{-1, 0, 1};
 
-    for (long long k = start; k < end; ++k) {
-        int i, j;
-        linear_to_pair(k, n, i, j);
-        int ov = (int)overlap_value(v[i], v[j]);
+    // Cada processo trabalha nos blocos:
+    // [rank*STRIDE + k*np*STRIDE, rank*STRIDE + k*np*STRIDE + STRIDE)
+    for (long long base = rank * STRIDE;
+         base < total;
+         base += (long long)np * STRIDE)
+    {
+        long long end = std::min(base + STRIDE, total);
 
-        if (ov > local.ov ||
-            (ov == local.ov && (i < local.i ||
-            (i == local.i && j < local.j))))
-        {
-            local.ov = ov;
-            local.i = i;
-            local.j = j;
+        for (long long k = base; k < end; ++k) {
+            int i, j;
+            linear_to_pair(k, n, i, j);
+
+            int ov = (int)overlap_value(v[i], v[j]);
+
+            if (ov > local.ov ||
+                (ov == local.ov && (i < local.i ||
+                (i == local.i && j < local.j))))
+            {
+                local.ov = ov;
+                local.i  = i;
+                local.j  = j;
+            }
         }
     }
 
     BestPair global;
     MPI_Reduce(&local, &global, 1, MPI_BEST_TYPE, MPI_BEST_OP, 0, comm);
-
     MPI_Bcast(&global, 3, MPI_INT, 0, comm);
 
     return global;
 }
+
 
 
 // ------------------------------------------------------------------
