@@ -228,43 +228,35 @@ static BestPair mpi_find_best_pair(const std::vector<String>& v, MPI_Comm comm)
     int n = (int)v.size();
     long long total = 1LL * n * (n - 1);
 
-    BestPair local{ -1, 0, 1 };
+    long long chunk = total / np;
+    long long start = rank * chunk;
+    long long end   = (rank == np - 1 ? total : start + chunk);
 
-    // tamanho do bloco de pares
-    const long long STRIDE = 256;
+    BestPair local{-1, 0, 1};
 
-    // cada processo pega blocos [base, base+STRIDE) intercalados
-    for (long long base = (long long)rank * STRIDE;
-         base < total;
-         base += (long long)np * STRIDE)
-    {
-        long long end = std::min(base + STRIDE, total);
+    for (long long k = start; k < end; ++k) {
+        int i, j;
+        linear_to_pair(k, n, i, j);
+        int ov = (int)overlap_value(v[i], v[j]);
 
-        for (long long k = base; k < end; ++k) {
-            int i, j;
-            linear_to_pair(k, n, i, j);
-            int ov = (int)overlap_value(v[i], v[j]);
-            if (ov > local.ov ||
-                (ov == local.ov && (i < local.i ||
-                 (i == local.i && j < local.j))))
-            {
-                local.ov = ov;
-                local.i  = i;
-                local.j  = j;
-            }
+        if (ov > local.ov ||
+            (ov == local.ov && (i < local.i ||
+            (i == local.i && j < local.j))))
+        {
+            local.ov = ov;
+            local.i = i;
+            local.j = j;
         }
     }
 
     BestPair global;
-    if (rank == 0) global = local;
-
     MPI_Reduce(&local, &global, 1, MPI_BEST_TYPE, MPI_BEST_OP, 0, comm);
 
-    // broadcast do resultado (3 ints: ov, i, j)
     MPI_Bcast(&global, 3, MPI_INT, 0, comm);
 
     return global;
 }
+
 
 // ------------------------------------------------------------------
 // aplica merge no root e difunde novo vetor
