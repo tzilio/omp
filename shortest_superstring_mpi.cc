@@ -286,11 +286,10 @@ int main(int argc, char** argv)
     return 0;
 }
 
-#else
-
-// ============================================================================
-// ========================= VERSÃO SEQUENCIAL =================================
-// ============================================================================
+#else  
+// =============================================================================
+// ======================== VERSÃO SEQUENCIAL ==================================
+// =============================================================================
 
 struct BestPairSequential {
     int ov;
@@ -298,46 +297,71 @@ struct BestPairSequential {
     int j;
 };
 
-static BestPairSequential seq_find_best_pair(const std::vector<String>& v)
+// mede quanto tempo é gasto na parte que seria paralelizável no MPI
+static BestPairSequential seq_find_best_pair(const std::vector<String>& v,
+                                             double& par_time)
 {
+    auto t0 = std::chrono::high_resolution_clock::now();
+
     BestPairSequential best{-1,0,1};
     int n = (int)v.size();
 
-    for (int i=0;i<n;++i)
-        for (int j=0;j<n;++j)
-            if (i!=j) {
+    for (int i = 0; i < n; ++i)
+        for (int j = 0; j < n; ++j)
+            if (i != j)
+            {
                 int ov = overlap_value(v[i], v[j]);
                 if (ov > best.ov ||
                    (ov == best.ov && (i < best.i ||
-                   (i==best.i && j < best.j))))
+                   (i == best.i && j < best.j))))
                 {
                     best = {ov,i,j};
                 }
             }
 
+    auto t1 = std::chrono::high_resolution_clock::now();
+    par_time += std::chrono::duration<double>(t1 - t0).count();
+
     return best;
 }
 
-static String shortest_superstring(std::vector<String> v)
+static String shortest_superstring(std::vector<String> v,
+                                   double& par_time)
 {
-    while (v.size() > 1) {
-        auto bp = seq_find_best_pair(v);
+    while (v.size() > 1)
+    {
+        BestPairSequential bp = seq_find_best_pair(v, par_time);
+
         String merged = overlap(v[bp.i], v[bp.j]);
         v[bp.i] = merged;
-        v.erase(v.begin()+bp.j);
+        v.erase(v.begin() + bp.j);
     }
+
     return v.empty() ? "" : v[0];
 }
 
 int main()
 {
+    // lê vetor (sempre vetor agora)
     auto v = read_vector();
-    auto start = std::chrono::high_resolution_clock::now();
-    auto ans = shortest_superstring(v);
-    auto end   = std::chrono::high_resolution_clock::now();
 
+    double par_time = 0.0;
+
+    const auto start = std::chrono::high_resolution_clock::now();
+    String ans = shortest_superstring(v, par_time);
+    const auto end = std::chrono::high_resolution_clock::now();
+
+    const double total = std::chrono::duration<double>(end - start).count();
+
+    // saída principal
     write_string(ans);
-    standard_output << std::chrono::duration<double>(end-start).count() << "\n";
+    standard_output << total << "\n";
+
+    // métricas extras no stderr
+    double seq_time = total - par_time;
+    double seq_frac = (total > 0.0 ? seq_time / total : 0.0);
+
+    std::cerr << total << " " << par_time << " " << seq_frac << "\n";
 
     return 0;
 }
