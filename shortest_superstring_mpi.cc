@@ -113,6 +113,15 @@ auto read_strings_from_standard_input() -> Set<String>
     return x;
 }
 
+// lê N e depois N strings em vetor
+static std::vector<String> read_input() 
+{
+    Size n; std::cin >> n;
+    std::vector<String> v(n);
+    for (Size i = 0; i < n; ++i) std::cin >> v[i];
+    return v;
+}
+
 inline auto write_string_to_standard_ouput(const String& s) -> void
 {
     write_string_and_break_line(standard_output, s);
@@ -125,24 +134,6 @@ inline auto write_string_to_standard_ouput(const String& s) -> void
 #ifdef _MPI
 
 // ------------------------------------------------------------------
-// converte Set<String> → vetor ordenado
-// ------------------------------------------------------------------
-static std::vector<String> set_to_vector(const Set<String>& ss)
-{
-    return std::vector<String>(ss.begin(), ss.end());
-}
-
-// ------------------------------------------------------------------
-// converte vetor → Set<String>
-// ------------------------------------------------------------------
-static Set<String> vector_to_set(const std::vector<String>& v)
-{
-    Set<String> ss;
-    for (auto& s : v) ss.insert(s);
-    return ss;
-}
-
-// ------------------------------------------------------------------
 // broadcast de vetor de strings
 // ------------------------------------------------------------------
 static void bcast_vector_strings(std::vector<String>& v, int root, MPI_Comm comm)
@@ -153,7 +144,7 @@ static void bcast_vector_strings(std::vector<String>& v, int root, MPI_Comm comm
     int n = (int)v.size();
     MPI_Bcast(&n, 1, MPI_INT, root, comm);
 
-    if (rank != root) v.resize(n);
+    if (rank != root) v.resize(n); 
 
     std::vector<int> lens(n);
     if (rank == root) {
@@ -226,7 +217,7 @@ static void best_reduce(void* invec, void* inout, int* len, MPI_Datatype*)
 }
 
 // ------------------------------------------------------------------
-// encontra melhor par global (MPI_Reduce)
+// encontra melhor par global (MPI_Reduce) com STRIDE em blocos
 // ------------------------------------------------------------------
 static BestPair mpi_find_best_pair(const std::vector<String>& v, MPI_Comm comm)
 {
@@ -239,17 +230,28 @@ static BestPair mpi_find_best_pair(const std::vector<String>& v, MPI_Comm comm)
 
     BestPair local{ -1, 0, 1 };
 
-    for (long long k = rank; k < total; k += np) {
-        int i, j;
-        linear_to_pair(k, n, i, j);
-        int ov = (int)overlap_value(v[i], v[j]);
-        if (ov > local.ov ||
-            (ov == local.ov && (i < local.i ||
-             (i == local.i && j < local.j))))
-        {
-            local.ov = ov;
-            local.i  = i;
-            local.j  = j;
+    // tamanho do bloco de pares
+    const long long STRIDE = 256;
+
+    // cada processo pega blocos [base, base+STRIDE) intercalados
+    for (long long base = (long long)rank * STRIDE;
+         base < total;
+         base += (long long)np * STRIDE)
+    {
+        long long end = std::min(base + STRIDE, total);
+
+        for (long long k = base; k < end; ++k) {
+            int i, j;
+            linear_to_pair(k, n, i, j);
+            int ov = (int)overlap_value(v[i], v[j]);
+            if (ov > local.ov ||
+                (ov == local.ov && (i < local.i ||
+                 (i == local.i && j < local.j))))
+            {
+                local.ov = ov;
+                local.i  = i;
+                local.j  = j;
+            }
         }
     }
 
@@ -258,7 +260,7 @@ static BestPair mpi_find_best_pair(const std::vector<String>& v, MPI_Comm comm)
 
     MPI_Reduce(&local, &global, 1, MPI_BEST_TYPE, MPI_BEST_OP, 0, comm);
 
-    // broadcast do resultado
+    // broadcast do resultado (3 ints: ov, i, j)
     MPI_Bcast(&global, 3, MPI_INT, 0, comm);
 
     return global;
@@ -287,10 +289,8 @@ static void mpi_apply_merge(std::vector<String>& v, BestPair bp, MPI_Comm comm)
 // ------------------------------------------------------------------
 // Algoritmo guloso MPI
 // ------------------------------------------------------------------
-static String shortest_superstring_mpi(Set<String> ss, MPI_Comm comm)
+static String shortest_superstring_mpi(std::vector<String> v, MPI_Comm comm)
 {
-    std::vector<String> v = set_to_vector(ss);
-
     while ((int)v.size() > 1) {
         BestPair bp = mpi_find_best_pair(v, comm);
         mpi_apply_merge(v, bp, comm);
@@ -329,16 +329,12 @@ int main(int argc, char** argv)
     int rank;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
-    Set<String> ss;
-    std::vector<String> v;
-
+    std::vector<String> ss;
     if (rank == 0) {
-        ss = read_strings_from_standard_input();
-        v  = set_to_vector(ss);
+        ss = read_input();
     }
 
-    bcast_vector_strings(v, 0, MPI_COMM_WORLD);
-    ss = vector_to_set(v);
+    bcast_vector_strings(ss, 0, MPI_COMM_WORLD);
 
     auto t0 = std::chrono::high_resolution_clock::now();
     String ans = shortest_superstring_mpi(ss, MPI_COMM_WORLD);
@@ -364,8 +360,7 @@ int main(int argc, char** argv)
 // mesma semântica de escolha que BestPair da versão MPI
 struct BestPairSequential {
     int ov;
-    int i;
-    int j;
+    int i, j;
 };
 
 static BestPairSequential seq_find_best_pair(const std::vector<String>& v)
@@ -395,12 +390,15 @@ static BestPairSequential seq_find_best_pair(const std::vector<String>& v)
 }
 
 // mesma lógica de merges que o shortest_superstring_mpi, porém local
-auto shortest_superstring(Set<String> ss) -> String
+auto shortest_superstring(std::vector<String> v, double& par_time) -> String
 {
-    std::vector<String> v = std::vector<String>(ss.begin(), ss.end());
-
     while (v.size() > 1) {
+
+        auto startP = std::chrono::high_resolution_clock::now();
         BestPairSequential bp = seq_find_best_pair(v);
+        auto endP = std::chrono::high_resolution_clock::now();
+
+        par_time += std::chrono::duration<double>(endP - startP).count();
 
         const int i = bp.i;
         const int j = bp.j;
@@ -415,14 +413,19 @@ auto shortest_superstring(Set<String> ss) -> String
 
 auto main (int /*argc*/, char const* /*argv*/[]) -> int
 {
-    Set<String> ss = read_strings_from_standard_input();
+    auto ss = read_input();  // lê em vetor
 
+    double par_time = 0.0;
     const auto start = std::chrono::high_resolution_clock::now();
-    write_string_to_standard_ouput(shortest_superstring(ss));
+    write_string_to_standard_ouput(shortest_superstring(ss, par_time));
     const auto end   = std::chrono::high_resolution_clock::now();
 
     const double total = std::chrono::duration<double>(end - start).count();
     standard_output << total << std::endl;
+
+    double seq_time = total - par_time;
+    double seq_frac = (total > 0.0) ? (seq_time/total) : 0.0;
+    std::cerr << total << " " << par_time << " " << seq_frac << "\n";
 
     return 0;
 }
