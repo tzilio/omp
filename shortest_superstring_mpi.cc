@@ -131,7 +131,7 @@ static void bcast_vector_strings(std::vector<String>& v, int root, MPI_Comm comm
 }
 
 // ------------------------------------------------------------
-// mapeamento linear k → par (i,j)
+// mapeamento linear k -> par (i,j)
 // ------------------------------------------------------------
 static inline void linear_to_pair(long long k, int n, int& i, int& j)
 {
