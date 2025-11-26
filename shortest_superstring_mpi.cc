@@ -297,7 +297,6 @@ struct BestPairSequential {
     int j;
 };
 
-// mede quanto tempo é gasto na parte que seria paralelizável no MPI
 static BestPairSequential seq_find_best_pair(const std::vector<String>& v,
                                              double& par_time)
 {
@@ -342,7 +341,6 @@ static String shortest_superstring(std::vector<String> v,
 
 int main()
 {
-    // lê vetor (sempre vetor agora)
     auto v = read_vector();
 
     double par_time = 0.0;
@@ -353,11 +351,9 @@ int main()
 
     const double total = std::chrono::duration<double>(end - start).count();
 
-    // saída principal
     write_string(ans);
     standard_output << total << "\n";
 
-    // métricas extras no stderr
     double seq_time = total - par_time;
     double seq_frac = (total > 0.0 ? seq_time / total : 0.0);
 
