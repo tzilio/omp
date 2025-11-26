@@ -169,7 +169,7 @@ static void best_reduce(void* invec, void* inout, int* len, MPI_Datatype*)
 }
 
 // ------------------------------------------------------------
-// STRIDED REAL: k = rank, rank+np, rank+2np ...
+// STRIDED : k = rank, rank+np, rank+2np ...
 // ------------------------------------------------------------
 static BestPair mpi_find_best_pair(const std::vector<String>& v, MPI_Comm comm)
 {
